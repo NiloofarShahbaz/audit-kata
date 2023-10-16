@@ -1,52 +1,53 @@
-import abc
-import os.path
 from datetime import datetime
-from typing import Any
+from dataclasses import dataclass
 
 
-class FileSystem(abc.ABC):
-    @abc.abstractmethod
-    def get_files(self, dir_name: str):
-        raise NotImplementedError
+@dataclass
+class FileContent:
+    file_path: str
+    content: str
 
-    @abc.abstractmethod
-    def write_all_text(self, new_file: str, content: str):
-        raise NotImplementedError
+    @property
+    def line_count(self) -> int:
+        return len(self.content.split('\n'))
 
-    @abc.abstractmethod
-    def read_all_lines(self, path: str):
-        raise NotImplementedError
+
+@dataclass
+class FileUpdate:
+    file_name: str
+    record: str
 
 
 class AuditManager:
-    def __init__(self, max_entries_per_file: int, directory_name: str, file_system: FileSystem):
+    first_file_name = 'audit_1.txt'
+
+    def __init__(self, max_entries_per_file: int, file_contents: list[FileContent]):
         self._max_entries_per_file = max_entries_per_file
-        self._directory_name = directory_name
-        self._file_system = file_system
+        self._file_contents = file_contents
+        self._sort_file_contents_by_index()
 
     def add_record(self, visitor_name: str, time_of_visit: datetime):
-        file_paths = self._file_system.get_files(self._directory_name)
-        sorted_paths = self._sort_by_index(file_paths)
         new_record = visitor_name + ';' + time_of_visit.strftime("%Y-%m-%d %H:%M:%S")
+        if len(self._file_contents) == 0:
+            return self._append_record_to_first_file(new_record)
+        return self._append_record_to_existing_file_or_new_file(new_record)
 
-        if len(sorted_paths) == 0:
-            new_file = os.path.join(self._directory_name, 'audit_1.txt')
-            self._file_system.write_all_text(new_file, new_record)
-            return
-
-        current_file_index, curr_file_path = sorted_paths[-1]
-        lines = self._file_system.read_all_lines(curr_file_path)
-
-        if len(lines) < self._max_entries_per_file:
-            lines.append(new_record)
-            new_content = '\n'.join(lines)
-            self._file_system.write_all_text(curr_file_path, new_content)
+    def _append_record_to_existing_file_or_new_file(self, new_record):
+        current_file_index, current_file_content = self._file_contents[-1]
+        if current_file_content.line_count < self._max_entries_per_file:
+            return self._append_record_to_current_file(current_file_content, new_record)
         else:
-            new_index = current_file_index + 1
-            new_name = f'audit_{new_index}.txt'
-            new_file = os.path.join(self._directory_name, new_name)
-            self._file_system.write_all_text(new_file, new_record)
+            return self._append_record_to_new_file(current_file_index, new_record)
 
-    @staticmethod
-    def _sort_by_index(file_paths) -> list[tuple[Any, Any]]:
-        return list(enumerate(sorted(file_paths), start=1))
+    def _append_record_to_new_file(self, current_file_index, new_record):
+        return FileUpdate(f'audit_{current_file_index + 1}.txt', new_record)
+
+    def _append_record_to_current_file(self, current_file_content, new_record):
+        new_content = f"{current_file_content.content}\n{new_record}"
+        return FileUpdate(current_file_content.file_path, new_content)
+
+    def _append_record_to_first_file(self, new_record):
+        return FileUpdate(self.first_file_name, new_record)
+
+    def _sort_file_contents_by_index(self):
+        self._file_contents = list(enumerate(sorted(self._file_contents, key=lambda x: x.file_path), start=1))
